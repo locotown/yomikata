@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import pg from 'pg';
+import postgres from 'postgres';
 
-const { Pool } = pg;
-
-// PostgreSQL connection pool
-// Railway internal connections don't need SSL
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+// PostgreSQL connection using postgres.js (pure JavaScript, works in serverless)
+const sql = postgres(process.env.DATABASE_URL || '', {
+  max: 1, // Limit connections for serverless
 });
 
 interface DictionaryEntry {
@@ -16,12 +13,12 @@ interface DictionaryEntry {
 
 export async function GET() {
   try {
-    const result = await pool.query<DictionaryEntry>(
-      'SELECT key, reading FROM dictionary_entries ORDER BY key'
-    );
+    const entries = await sql<DictionaryEntry[]>`
+      SELECT key, reading FROM dictionary_entries ORDER BY key
+    `;
 
     return NextResponse.json({
-      entries: result.rows,
+      entries,
     });
   } catch (error) {
     console.error('Database error:', error);
@@ -41,12 +38,11 @@ export async function POST(request: NextRequest) {
     }
 
     // UPSERT: Insert or update if key exists
-    await pool.query(
-      `INSERT INTO dictionary_entries (key, reading)
-       VALUES ($1, $2)
-       ON CONFLICT (key) DO UPDATE SET reading = $2, updated_at = NOW()`,
-      [key, reading]
-    );
+    await sql`
+      INSERT INTO dictionary_entries (key, reading)
+      VALUES (${key}, ${reading})
+      ON CONFLICT (key) DO UPDATE SET reading = ${reading}, updated_at = NOW()
+    `;
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -66,14 +62,13 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'key required' }, { status: 400 });
     }
 
-    const result = await pool.query(
-      'DELETE FROM dictionary_entries WHERE key = $1',
-      [key]
-    );
+    const result = await sql`
+      DELETE FROM dictionary_entries WHERE key = ${key}
+    `;
 
     return NextResponse.json({
       success: true,
-      deleted: result.rowCount && result.rowCount > 0,
+      deleted: result.count > 0,
     });
   } catch (error) {
     console.error('Database error:', error);
