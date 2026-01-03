@@ -1,0 +1,75 @@
+{
+  "name": "yomikata",
+  "version": "0.1.0",
+  "description": "Japanese TTS text preprocessing library for correct pronunciation - 日本語TTS読み間違い対策ライブラリ",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./browser": {
+      "import": {
+        "types": "./dist/browser.d.ts",
+        "default": "./dist/browser.js"
+      }
+    }
+  },
+  "browser": "./dist/browser.js",
+  "bin": {
+    "yomikata": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "japanese",
+    "tts",
+    "text-to-speech",
+    "preprocessing",
+    "pronunciation",
+    "gemini",
+    "speech-synthesis",
+    "読み方",
+    "音声合成",
+    "助数詞"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yshiiya/yomikata.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yshiiya/yomikata/issues"
+  },
+  "homepage": "https://github.com/yshiiya/yomikata#readme",
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.10.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "commander": "^14.0.2"
+  }
+}

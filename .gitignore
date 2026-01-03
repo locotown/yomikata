@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.next/
+out/
+build/
+
+# OS files
+.DS_Store
+*.pem
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+.pnpm-debug.log*
+
+# Environment files
+.env*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# TypeScript
+*.tsbuildinfo
+
+# Vercel/Railway
+.vercel
+.railway
+
+# Coverage
+coverage/
+
+# Test temp files
+.yomikata/
+
+# VIBE snapshots
+snapshots/
+.vibe-last-snapshot
+misreadings-log.md
