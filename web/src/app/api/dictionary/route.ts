@@ -4,9 +4,9 @@ import pg from 'pg';
 const { Pool } = pg;
 
 // PostgreSQL connection pool
+// Railway internal connections don't need SSL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
 interface DictionaryEntry {
