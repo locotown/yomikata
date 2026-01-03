@@ -13,6 +13,17 @@ import { convertLargeNumbers } from './rules/numbers';
 import { convertOrdinals } from './rules/ordinals';
 
 /**
+ * 全角数字を半角に正規化
+ * TTS APIが生成するテキストには全角数字が含まれることがあるため、
+ * 正規表現 \d でマッチできるように事前に正規化する
+ */
+function normalizeFullWidthDigits(text: string): string {
+  return text.replace(/[０-９]/g, (char) => {
+    return String.fromCharCode(char.charCodeAt(0) - 0xff10 + 0x30);
+  });
+}
+
+/**
  * ブラウザ向け設定オプション
  * ファイル関連のオプションは除外
  */
@@ -63,7 +74,9 @@ const DEFAULT_CONFIG: Required<YomikataBrowserConfig> = {
  */
 function convert(text: string, config?: YomikataBrowserConfig): string {
   const mergedConfig = { ...DEFAULT_CONFIG, ...config };
-  let result = text;
+
+  // Step 0: 全角数字を半角に正規化（正規表現 \d でマッチできるように）
+  let result = normalizeFullWidthDigits(text);
 
   // Step 1: カスタム辞書を適用
   if (mergedConfig.dictionary && Object.keys(mergedConfig.dictionary).length > 0) {

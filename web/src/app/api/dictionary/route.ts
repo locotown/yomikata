@@ -1,106 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+import pg from 'pg';
 
-interface DictionaryFile {
-  entries: Record<string, string>;
-  metadata?: Record<string, unknown>;
-}
+const { Pool } = pg;
+
+// PostgreSQL connection pool
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
 
 interface DictionaryEntry {
   key: string;
   reading: string;
-  scope: 'global' | 'project';
 }
 
-function getGlobalPath(): string {
-  return join(homedir(), '.yomikata', 'dictionary.json');
-}
-
-function getProjectDictionaryPath(projectPath: string): string {
-  return join(projectPath, '.yomikata', 'dictionary.json');
-}
-
-function loadDictionary(path: string): DictionaryFile {
-  if (!existsSync(path)) {
-    return { entries: {} };
-  }
+export async function GET() {
   try {
-    const content = readFileSync(path, 'utf-8');
-    const parsed = JSON.parse(content);
-    if (parsed.entries === undefined) {
-      return { entries: parsed };
-    }
-    return { entries: parsed.entries || {}, metadata: parsed.metadata };
-  } catch {
-    return { entries: {} };
+    const result = await pool.query<DictionaryEntry>(
+      'SELECT key, reading FROM dictionary_entries ORDER BY key'
+    );
+
+    return NextResponse.json({
+      entries: result.rows,
+    });
+  } catch (error) {
+    console.error('Database error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Database error' },
+      { status: 500 }
+    );
   }
-}
-
-function saveDictionary(path: string, dict: DictionaryFile): void {
-  const dir = dirname(path);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  dict.metadata = {
-    ...dict.metadata,
-    lastUpdated: new Date().toISOString().split('T')[0],
-  };
-  writeFileSync(path, JSON.stringify(dict, null, 2), 'utf-8');
-}
-
-export async function GET(request: NextRequest) {
-  const entries: DictionaryEntry[] = [];
-  const projectPath = request.nextUrl.searchParams.get('projectPath');
-
-  // グローバル辞書は常に読み込む
-  const globalPath = getGlobalPath();
-  const globalDict = loadDictionary(globalPath);
-  for (const [key, reading] of Object.entries(globalDict.entries)) {
-    entries.push({ key, reading, scope: 'global' });
-  }
-
-  // プロジェクトパスが指定されている場合のみプロジェクト辞書を読み込む
-  if (projectPath) {
-    const projectDictPath = getProjectDictionaryPath(projectPath);
-    const projectDict = loadDictionary(projectDictPath);
-    for (const [key, reading] of Object.entries(projectDict.entries)) {
-      entries.push({ key, reading, scope: 'project' });
-    }
-  }
-
-  return NextResponse.json({
-    entries,
-    projectPath: projectPath || null,
-    projectName: projectPath ? basename(projectPath) : null,
-  });
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { key, reading, scope, projectPath } = await request.json();
+    const { key, reading } = await request.json();
 
     if (!key || !reading) {
       return NextResponse.json({ error: 'key and reading required' }, { status: 400 });
     }
 
-    if (scope === 'project' && !projectPath) {
-      return NextResponse.json({ error: 'projectPath required for project scope' }, { status: 400 });
-    }
+    // UPSERT: Insert or update if key exists
+    await pool.query(
+      `INSERT INTO dictionary_entries (key, reading)
+       VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET reading = $2, updated_at = NOW()`,
+      [key, reading]
+    );
 
-    const path = scope === 'global'
-      ? getGlobalPath()
-      : getProjectDictionaryPath(projectPath);
-
-    const dict = loadDictionary(path);
-    dict.entries[key] = reading;
-    saveDictionary(path, dict);
-
-    return NextResponse.json({ success: true, path });
+    return NextResponse.json({ success: true });
   } catch (error) {
+    console.error('Database error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
+      { error: error instanceof Error ? error.message : 'Database error' },
       { status: 500 }
     );
   }
@@ -108,31 +60,25 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { key, scope, projectPath } = await request.json();
+    const { key } = await request.json();
 
     if (!key) {
       return NextResponse.json({ error: 'key required' }, { status: 400 });
     }
 
-    if (scope === 'project' && !projectPath) {
-      return NextResponse.json({ error: 'projectPath required for project scope' }, { status: 400 });
-    }
+    const result = await pool.query(
+      'DELETE FROM dictionary_entries WHERE key = $1',
+      [key]
+    );
 
-    const path = scope === 'global'
-      ? getGlobalPath()
-      : getProjectDictionaryPath(projectPath);
-
-    const dict = loadDictionary(path);
-
-    if (key in dict.entries) {
-      delete dict.entries[key];
-      saveDictionary(path, dict);
-    }
-
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      deleted: result.rowCount && result.rowCount > 0,
+    });
   } catch (error) {
+    console.error('Database error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
+      { error: error instanceof Error ? error.message : 'Database error' },
       { status: 500 }
     );
   }

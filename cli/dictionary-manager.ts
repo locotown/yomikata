@@ -1,13 +1,12 @@
 /**
- * 辞書管理クラス
+ * 辞書管理クラス（API経由）
  *
- * グローバル辞書とプロジェクト辞書のCRUD操作を提供
+ * Railway上のPostgreSQLに接続されたAPIを通じて辞書を操作
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import type { DictionaryFile, DictionaryScope } from '../src/dictionary/types';
 
 /**
  * 辞書エントリの情報
@@ -15,213 +14,143 @@ import type { DictionaryFile, DictionaryScope } from '../src/dictionary/types';
 export interface DictionaryEntry {
   key: string;
   reading: string;
-  scope: DictionaryScope;
-  source?: string;
 }
 
 /**
- * 辞書管理クラス
+ * 設定ファイルの形式
+ */
+interface Config {
+  apiUrl: string;
+}
+
+/**
+ * デフォルトのAPI URL
+ */
+const DEFAULT_API_URL = 'https://yomikata-web-production.up.railway.app';
+
+/**
+ * 設定ファイルのパス
+ */
+const CONFIG_PATH = join(homedir(), '.yomikata', 'config.json');
+
+/**
+ * 辞書管理クラス（API経由）
  */
 export class DictionaryManager {
-  private globalPath: string;
-  private projectPath: string;
+  private apiUrl: string;
 
-  constructor(projectDir: string = process.cwd()) {
-    this.globalPath = join(homedir(), '.yomikata', 'dictionary.json');
-    this.projectPath = join(projectDir, '.yomikata', 'dictionary.json');
+  constructor() {
+    this.apiUrl = this.loadConfig().apiUrl;
   }
 
   /**
-   * 辞書ファイルのパスを取得
+   * 設定ファイルを読み込む
    */
-  getPath(scope: DictionaryScope): string {
-    return scope === 'global' ? this.globalPath : this.projectPath;
-  }
-
-  /**
-   * 辞書ファイルを読み込む
-   */
-  private loadDictionary(path: string): DictionaryFile {
-    if (!existsSync(path)) {
-      return { entries: {}, metadata: {} };
+  private loadConfig(): Config {
+    // 環境変数が設定されていれば優先
+    if (process.env.YOMIKATA_API_URL) {
+      return { apiUrl: process.env.YOMIKATA_API_URL };
     }
 
-    try {
-      const content = readFileSync(path, 'utf-8');
-      const parsed = JSON.parse(content);
-
-      // 古い形式（フラット）もサポート
-      if (parsed.entries === undefined && typeof parsed === 'object') {
-        return { entries: parsed, metadata: {} };
+    // 設定ファイルを読み込む
+    if (existsSync(CONFIG_PATH)) {
+      try {
+        const content = readFileSync(CONFIG_PATH, 'utf-8');
+        const config = JSON.parse(content);
+        if (config.apiUrl) {
+          return { apiUrl: config.apiUrl };
+        }
+      } catch {
+        // 設定ファイルの読み込みに失敗した場合はデフォルトを使用
       }
-
-      return {
-        entries: parsed.entries || {},
-        metadata: parsed.metadata || {},
-      };
-    } catch {
-      return { entries: {}, metadata: {} };
     }
+
+    return { apiUrl: DEFAULT_API_URL };
   }
 
   /**
-   * 辞書ファイルを保存
+   * 設定を保存
    */
-  private saveDictionary(path: string, dict: DictionaryFile): void {
-    const dir = dirname(path);
+  saveConfig(apiUrl: string): void {
+    const dir = dirname(CONFIG_PATH);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-
-    // メタデータを更新
-    dict.metadata = {
-      ...dict.metadata,
-      lastUpdated: new Date().toISOString().split('T')[0],
-    };
-
-    writeFileSync(path, JSON.stringify(dict, null, 2), 'utf-8');
+    writeFileSync(CONFIG_PATH, JSON.stringify({ apiUrl }, null, 2), 'utf-8');
+    this.apiUrl = apiUrl;
   }
 
   /**
-   * 辞書を初期化
+   * 現在のAPI URLを取得
    */
-  init(scope: DictionaryScope): { path: string; created: boolean } {
-    const path = this.getPath(scope);
-
-    if (existsSync(path)) {
-      return { path, created: false };
-    }
-
-    const dict: DictionaryFile = {
-      entries: {},
-      metadata: {
-        version: '1.0',
-        lastUpdated: new Date().toISOString().split('T')[0],
-      },
-    };
-
-    this.saveDictionary(path, dict);
-    return { path, created: true };
+  getApiUrl(): string {
+    return this.apiUrl;
   }
 
   /**
    * エントリを追加
    */
-  add(key: string, reading: string, scope: DictionaryScope): { success: boolean; path: string } {
-    const path = this.getPath(scope);
-    const dict = this.loadDictionary(path);
+  async add(key: string, reading: string): Promise<{ success: boolean }> {
+    const res = await fetch(`${this.apiUrl}/api/dictionary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, reading }),
+    });
 
-    dict.entries[key] = reading;
-    this.saveDictionary(path, dict);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `API error: ${res.status}`);
+    }
 
-    return { success: true, path };
+    return { success: true };
   }
 
   /**
    * エントリを削除
    */
-  remove(key: string, scope: DictionaryScope): { success: boolean; existed: boolean; path: string } {
-    const path = this.getPath(scope);
-    const dict = this.loadDictionary(path);
+  async remove(key: string): Promise<{ success: boolean; deleted: boolean }> {
+    const res = await fetch(`${this.apiUrl}/api/dictionary`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
 
-    const existed = key in dict.entries;
-    if (existed) {
-      delete dict.entries[key];
-      this.saveDictionary(path, dict);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `API error: ${res.status}`);
     }
 
-    return { success: true, existed, path };
+    const data = await res.json();
+    return { success: true, deleted: data.deleted };
   }
 
   /**
    * エントリ一覧を取得
    */
-  list(scope?: DictionaryScope): DictionaryEntry[] {
-    const entries: DictionaryEntry[] = [];
+  async list(): Promise<DictionaryEntry[]> {
+    const res = await fetch(`${this.apiUrl}/api/dictionary`);
 
-    if (!scope || scope === 'global') {
-      const globalDict = this.loadDictionary(this.globalPath);
-      for (const [key, reading] of Object.entries(globalDict.entries)) {
-        entries.push({ key, reading, scope: 'global', source: this.globalPath });
-      }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `API error: ${res.status}`);
     }
 
-    if (!scope || scope === 'project') {
-      const projectDict = this.loadDictionary(this.projectPath);
-      for (const [key, reading] of Object.entries(projectDict.entries)) {
-        entries.push({ key, reading, scope: 'project', source: this.projectPath });
-      }
-    }
-
-    return entries;
+    const data = await res.json();
+    return data.entries;
   }
 
   /**
-   * 辞書ファイルをインポート
+   * テキストを変換（プレビュー用）
    */
-  import(
-    filePath: string,
-    scope: DictionaryScope
-  ): { success: boolean; imported: number; path: string } {
-    if (!existsSync(filePath)) {
-      throw new Error(`ファイルが見つかりません: ${filePath}`);
+  async test(text: string): Promise<string> {
+    // エントリを取得して変換を適用
+    const entries = await this.list();
+
+    let result = text;
+    for (const entry of entries) {
+      result = result.replace(new RegExp(entry.key, 'g'), entry.reading);
     }
 
-    const content = readFileSync(filePath, 'utf-8');
-    let importData: Record<string, string>;
-
-    try {
-      const parsed = JSON.parse(content);
-      // 新形式と旧形式の両方をサポート
-      importData = parsed.entries || parsed;
-    } catch {
-      throw new Error(`JSONの解析に失敗しました: ${filePath}`);
-    }
-
-    const path = this.getPath(scope);
-    const dict = this.loadDictionary(path);
-
-    let imported = 0;
-    for (const [key, reading] of Object.entries(importData)) {
-      if (typeof reading === 'string') {
-        dict.entries[key] = reading;
-        imported++;
-      }
-    }
-
-    this.saveDictionary(path, dict);
-
-    return { success: true, imported, path };
-  }
-
-  /**
-   * 辞書をエクスポート
-   */
-  export(scope?: DictionaryScope): DictionaryFile {
-    const entries: Record<string, string> = {};
-
-    if (!scope || scope === 'global') {
-      const globalDict = this.loadDictionary(this.globalPath);
-      Object.assign(entries, globalDict.entries);
-    }
-
-    if (!scope || scope === 'project') {
-      const projectDict = this.loadDictionary(this.projectPath);
-      Object.assign(entries, projectDict.entries);
-    }
-
-    return {
-      entries,
-      metadata: {
-        exportedAt: new Date().toISOString(),
-      },
-    };
-  }
-
-  /**
-   * 辞書が存在するかチェック
-   */
-  exists(scope: DictionaryScope): boolean {
-    return existsSync(this.getPath(scope));
+    return result;
   }
 }

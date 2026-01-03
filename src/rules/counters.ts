@@ -353,49 +353,124 @@ const NUMBER_READINGS: Record<string, string> = {
 };
 
 /**
+ * 漢数字からアラビア数字へのマッピング
+ */
+const KANJI_TO_ARABIC: Record<string, string> = {
+  '一': '1',
+  '二': '2',
+  '三': '3',
+  '四': '4',
+  '五': '5',
+  '六': '6',
+  '七': '7',
+  '八': '8',
+  '九': '9',
+  '十': '10',
+};
+
+/**
+ * 漢数字を数値に変換（1〜99対応）
+ * 例: 九 → 9, 十 → 10, 十一 → 11, 二十三 → 23
+ */
+function parseKanjiNumber(kanjiStr: string): number | null {
+  // 一桁の漢数字
+  if (KANJI_TO_ARABIC[kanjiStr]) {
+    return Number.parseInt(KANJI_TO_ARABIC[kanjiStr], 10);
+  }
+
+  // 十だけ
+  if (kanjiStr === '十') {
+    return 10;
+  }
+
+  // 十X（11〜19）
+  const tenPlusMatch = kanjiStr.match(/^十([一二三四五六七八九])$/);
+  if (tenPlusMatch) {
+    const ones = Number.parseInt(KANJI_TO_ARABIC[tenPlusMatch[1]], 10);
+    return 10 + ones;
+  }
+
+  // X十（20, 30, ... 90）
+  const timesTenMatch = kanjiStr.match(/^([二三四五六七八九])十$/);
+  if (timesTenMatch) {
+    const tens = Number.parseInt(KANJI_TO_ARABIC[timesTenMatch[1]], 10);
+    return tens * 10;
+  }
+
+  // X十Y（21〜99）
+  const fullMatch = kanjiStr.match(/^([二三四五六七八九])十([一二三四五六七八九])$/);
+  if (fullMatch) {
+    const tens = Number.parseInt(KANJI_TO_ARABIC[fullMatch[1]], 10);
+    const ones = Number.parseInt(KANJI_TO_ARABIC[fullMatch[2]], 10);
+    return tens * 10 + ones;
+  }
+
+  return null;
+}
+
+/**
  * 数字+助数詞パターンをひらがな読みに変換
  * TTSが誤読しやすい「9歳」→「くさい」などの問題を解決
+ * アラビア数字（9歳、１０歳）と漢数字（九歳、十歳）の両方に対応
  */
 export function convertCounters(text: string): string {
   let result = text;
 
   for (const pattern of COUNTER_PATTERNS) {
-    // 1〜99の数字+助数詞パターンにマッチ
-    const regex = new RegExp(`(\\d{1,2})${pattern.counter}`, 'g');
+    // 1〜99のアラビア数字+助数詞パターンにマッチ
+    const arabicRegex = new RegExp(`(\\d{1,2})${pattern.counter}`, 'g');
 
-    result = result.replace(regex, (match, numStr) => {
-      // 定義済みの読み方があればそれを使用
-      if (pattern.readings[numStr]) {
-        return pattern.readings[numStr];
-      }
+    result = result.replace(arabicRegex, (match, numStr) => {
+      return convertNumberWithCounter(numStr, pattern) ?? match;
+    });
 
-      // 10以上の数字は合成（例：15歳 → じゅうごさい）
-      const num = Number.parseInt(numStr, 10);
-      if (num > 10 && num < 100) {
-        const tens = Math.floor(num / 10);
-        const ones = num % 10;
+    // 漢数字+助数詞パターンにマッチ（一〜九、十、十一〜十九、二十〜九十九）
+    const kanjiRegex = new RegExp(
+      `([一二三四五六七八九十]十?[一二三四五六七八九]?|十[一二三四五六七八九]?)${pattern.counter}`,
+      'g',
+    );
 
-        // 10の位の読み
-        let reading = tens === 1 ? 'じゅう' : `${NUMBER_READINGS[tens.toString()]}じゅう`;
-
-        // 1の位がある場合は追加
-        if (ones > 0) {
-          // 1の位+助数詞の定義済み読み方を使用（音便対応のため）
-          const onesReading = pattern.readings[ones.toString()];
-          if (onesReading) {
-            reading += onesReading;
-            return reading;
-          }
-          reading += NUMBER_READINGS[ones.toString()];
-        }
-
-        return reading + pattern.defaultSuffix;
-      }
-
-      // フォールバック: 数字をそのまま残す
-      return match;
+    result = result.replace(kanjiRegex, (match, kanjiNum) => {
+      const num = parseKanjiNumber(kanjiNum);
+      if (num === null) return match;
+      return convertNumberWithCounter(num.toString(), pattern) ?? match;
     });
   }
 
   return result;
+}
+
+/**
+ * 数字と助数詞パターンから読み方を生成
+ */
+function convertNumberWithCounter(numStr: string, pattern: CounterPattern): string | null {
+  // 定義済みの読み方があればそれを使用
+  if (pattern.readings[numStr]) {
+    return pattern.readings[numStr];
+  }
+
+  // 10以上の数字は合成（例：15歳 → じゅうごさい）
+  const num = Number.parseInt(numStr, 10);
+  if (num > 10 && num < 100) {
+    const tens = Math.floor(num / 10);
+    const ones = num % 10;
+
+    // 10の位の読み
+    let reading = tens === 1 ? 'じゅう' : `${NUMBER_READINGS[tens.toString()]}じゅう`;
+
+    // 1の位がある場合は追加
+    if (ones > 0) {
+      // 1の位+助数詞の定義済み読み方を使用（音便対応のため）
+      const onesReading = pattern.readings[ones.toString()];
+      if (onesReading) {
+        reading += onesReading;
+        return reading;
+      }
+      reading += NUMBER_READINGS[ones.toString()];
+    }
+
+    return reading + pattern.defaultSuffix;
+  }
+
+  return null;
 }

@@ -1,6 +1,5 @@
 import { AddEntryForm } from '@/components/AddEntryForm';
 import { DictionaryList } from '@/components/DictionaryList';
-import { ProjectSelector } from '@/components/ProjectSelector';
 import { SearchBar } from '@/components/SearchBar';
 
 export default function Home() {
@@ -17,7 +16,6 @@ export default function Home() {
         </header>
 
         <div className="space-y-6">
-          <ProjectSelector />
           <AddEntryForm />
 
           <div className="space-y-4">
